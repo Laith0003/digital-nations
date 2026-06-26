@@ -93,6 +93,9 @@
 
         const viewer = new Cesium.Viewer('cesiumContainer', {
           terrainProvider: terrain,
+          // COLUMBUS_VIEW = a FLAT tilted map (the holo-table), not a globe sphere,
+          // with real terrain + buildings standing up on it.
+          sceneMode: Cesium.SceneMode.COLUMBUS_VIEW,
           baseLayerPicker: false, geocoder: false, homeButton: false, sceneModePicker: false,
           navigationHelpButton: false, animation: false, timeline: false, fullscreenButton: false,
           infoBox: false, selectionIndicator: false, requestRenderMode: false,
@@ -110,6 +113,11 @@
         scene.highDynamicRange = true;
         // Dusk light so the water glints and ridges rake — the holo-table mood.
         viewer.clock.currentTime = Cesium.JulianDate.fromIso8601('2026-06-26T15:30:00Z');
+        // Advance the clock so the ocean water mask animates (it was frozen before).
+        // requestRenderMode:false already redraws every frame (scrolls the wave
+        // normals); shouldAnimate keeps the sim clock live too. Natural speed so the
+        // sun does not race across the terrain.
+        viewer.clock.shouldAnimate = true;
 
         status('STREAMING TERRAIN');
         // Real photoreal 3D buildings (global OSM footprints + heights).
