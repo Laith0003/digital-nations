@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Digital Nations — Cesium Proof (real terrain, real waves, real buildings)</title>
+  <!-- CesiumJS from the official CDN. CESIUM_BASE_URL must be set before the script loads. -->
+  <script>window.CESIUM_BASE_URL = 'https://cesium.com/downloads/cesiumjs/releases/1.140/Build/Cesium/';</script>
+  <link href="https://cesium.com/downloads/cesiumjs/releases/1.140/Build/Cesium/Widgets/widgets.css" rel="stylesheet" />
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.140/Build/Cesium/Cesium.js"></script>
+  <style>
+    :root { --cyan:#0bd3e6; --ink:#03090d; }
+    * { box-sizing:border-box; }
+    html,body { margin:0; height:100%; background:var(--ink); color:#cfeaf0;
+      font-family:"IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace; overflow:hidden; }
+    #cesiumContainer { position:fixed; inset:0; }
+    /* Hide Cesium's default chrome so it reads as a command surface, not a demo widget. */
+    .cesium-viewer-bottom, .cesium-viewer-animationContainer, .cesium-viewer-timelineContainer,
+    .cesium-viewer-toolbar, .cesium-widget-credits { display:none !important; }
+    .cesium-widget canvas { filter: contrast(1.04) saturate(0.92); }
+
+    /* Holographic vignette + cyan grade, pointer-transparent so it never blocks the globe. */
+    #grade { position:fixed; inset:0; pointer-events:none; z-index:5;
+      background:
+        radial-gradient(120% 90% at 50% 38%, rgba(11,211,230,0.06), rgba(3,9,13,0) 55%),
+        radial-gradient(140% 120% at 50% 60%, rgba(3,9,13,0) 55%, rgba(3,9,13,0.72) 100%);
+      mix-blend-mode:screen; }
+    #scan { position:fixed; inset:0; pointer-events:none; z-index:6; opacity:0.05;
+      background:repeating-linear-gradient(0deg, #0bd3e6 0 1px, transparent 1px 3px); }
+
+    .hud { position:fixed; z-index:7; pointer-events:none; color:#bfe7ee;
+      letter-spacing:0.18em; font-size:11px; text-transform:uppercase; opacity:0.85; }
+    .hud.tl { top:18px; left:20px; }
+    .hud.tr { top:18px; right:20px; text-align:right; }
+    .hud b { color:var(--cyan); font-weight:600; }
+
+    /* Token gate */
+    #gate { position:fixed; inset:0; z-index:20; display:flex; align-items:center; justify-content:center;
+      background:radial-gradient(80% 80% at 50% 40%, #06141a, #03090d); }
+    .card { width:min(520px, 92vw); border:1px solid rgba(11,211,230,0.25);
+      background:linear-gradient(180deg, rgba(8,26,32,0.9), rgba(4,12,16,0.92));
+      border-radius:14px; padding:26px 26px 22px; box-shadow:0 0 0 1px rgba(0,0,0,0.4), 0 30px 80px rgba(0,0,0,0.6); }
+    .card h1 { font-size:15px; letter-spacing:0.22em; margin:0 0 4px; color:#eaffff; }
+    .card .sub { font-size:12px; line-height:1.55; color:#9fc4cc; margin:0 0 18px; letter-spacing:0.02em; text-transform:none; }
+    .card a { color:var(--cyan); text-decoration:none; border-bottom:1px solid rgba(11,211,230,0.4); }
+    .row { display:flex; gap:10px; }
+    input { flex:1; background:#02080b; border:1px solid rgba(11,211,230,0.3); color:#dff6fa;
+      padding:12px 13px; border-radius:9px; font-family:inherit; font-size:12px; letter-spacing:0.04em; outline:none; }
+    input:focus { border-color:var(--cyan); box-shadow:0 0 0 3px rgba(11,211,230,0.12); }
+    button { background:var(--cyan); color:#02181c; border:0; font-family:inherit; font-weight:700;
+      letter-spacing:0.12em; padding:12px 18px; border-radius:9px; cursor:pointer; text-transform:uppercase; font-size:12px; }
+    button:active { transform:translateY(1px); }
+    .err { color:#ff7a7a; font-size:11px; margin-top:10px; min-height:14px; letter-spacing:0.02em; text-transform:none; }
+    .steps { font-size:11px; color:#7fa6ae; margin-top:16px; line-height:1.7; letter-spacing:0.02em; text-transform:none; }
+    .steps b { color:#bfe7ee; }
+  </style>
+</head>
+<body>
+  <div id="cesiumContainer"></div>
+  <div id="grade"></div>
+  <div id="scan"></div>
+  <div class="hud tl">DIGITAL NATIONS · <b>CESIUM PROOF</b><br/>real terrain · real water · real buildings</div>
+  <div class="hud tr" id="status">INITIALISING</div>
+
+  <div id="gate">
+    <div class="card">
+      <h1>CESIUM ACCESS TOKEN</h1>
+      <p class="sub">This proof renders real Google-Earth-grade 3D: Cesium World Terrain (with an animated ocean water mask), Cesium OSM Buildings (real footprints + heights), and global imagery. It needs a free Cesium ion token to stream the data, the one piece no real-3D map can skip.</p>
+      <div class="row">
+        <input id="tok" type="text" placeholder="paste your Cesium ion token" autocomplete="off" spellcheck="false" />
+        <button id="go">Launch</button>
+      </div>
+      <div class="err" id="err"></div>
+      <div class="steps">
+        <b>Get one in 2 minutes:</b> open <a href="https://ion.cesium.com/tokens" target="_blank" rel="noopener">ion.cesium.com/tokens</a> → sign up free → copy the default token → paste above.<br/>
+        The token stays in this browser only (localStorage). Add <b>?token=…</b> to the URL to skip this screen.
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const status = (t) => { const s = $('status'); if (s) s.textContent = t; };
+
+    async function boot(token) {
+      try {
+        $('err').textContent = '';
+        status('AUTHENTICATING');
+        Cesium.Ion.defaultAccessToken = token;
+
+        // Real terrain WITH the water mask -> Cesium's native animated ocean (waves + sun/moon glint).
+        const terrain = await Cesium.createWorldTerrainAsync({ requestWaterMask: true, requestVertexNormals: true });
+
+        const viewer = new Cesium.Viewer('cesiumContainer', {
+          terrainProvider: terrain,
+          baseLayerPicker: false, geocoder: false, homeButton: false, sceneModePicker: false,
+          navigationHelpButton: false, animation: false, timeline: false, fullscreenButton: false,
+          infoBox: false, selectionIndicator: false, requestRenderMode: false,
+        });
+
+        // token was valid (createWorldTerrainAsync would have thrown otherwise) -> dismiss the gate
+        localStorage.setItem('dn_cesium_token', token);
+        $('gate').style.display = 'none';
+
+        const scene = viewer.scene;
+        scene.globe.enableLighting = true;          // real sun/terminator shading
+        scene.globe.depthTestAgainstTerrain = true; // buildings sit on the ground, water occludes correctly
+        scene.skyAtmosphere.show = true;
+        scene.fog.enabled = true;
+        scene.highDynamicRange = true;
+        // Dusk light so the water glints and ridges rake — the holo-table mood.
+        viewer.clock.currentTime = Cesium.JulianDate.fromIso8601('2026-06-26T15:30:00Z');
+
+        status('STREAMING TERRAIN');
+        // Real photoreal 3D buildings (global OSM footprints + heights).
+        try {
+          const osm = await Cesium.createOsmBuildingsAsync();
+          scene.primitives.add(osm);
+        } catch (e) { /* buildings optional; terrain + water still prove the point */ }
+
+        // Sit over the Levant coast: sea on one side (animated water), mountains + cities on the other.
+        viewer.camera.flyTo({
+          destination: Cesium.Cartesian3.fromDegrees(35.35, 33.55, 90000),
+          orientation: { heading: Cesium.Math.toRadians(35), pitch: Cesium.Math.toRadians(-32), roll: 0 },
+          duration: 3.0,
+        });
+        status('LIVE · BEIRUT COAST');
+      } catch (e) {
+        // Most common: bad/expired token -> show the gate again with a clear message.
+        $('gate').style.display = 'flex';
+        $('err').textContent = (String(e).includes('401') || String(e).toLowerCase().includes('token'))
+          ? 'That token was rejected. Copy the default token from ion.cesium.com/tokens and try again.'
+          : ('Failed to start: ' + (e && e.message ? e.message : e));
+        status('TOKEN REQUIRED');
+      }
+    }
+
+    // URL ?token= or saved token skips the gate.
+    const urlToken = new URLSearchParams(location.search).get('token');
+    const saved = localStorage.getItem('dn_cesium_token');
+    if (urlToken) boot(urlToken.trim());
+    else if (saved) boot(saved);
+
+    $('go').addEventListener('click', () => {
+      const t = $('tok').value.trim();
+      if (t) boot(t); else $('err').textContent = 'Paste a token first.';
+    });
+    $('tok').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('go').click(); });
+  </script>
+</body>
+</html>
